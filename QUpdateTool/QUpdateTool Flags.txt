@@ -1,0 +1,4 @@
+QUpdateTool Flags:
+==================
+-- config-file ** if config file passed, gather all variables. any additional flags can overwrite config data
+-- 
