@@ -1,7 +1,8 @@
 import sys
-from PySide6.QtWidgets import *
-from PySide6.QtGui import *
-from PySide6.QtCore import *
+import os
+from PySide6.QtWidgets import QApplication, QWidget, QLabel, QProgressBar, QPushButton, QGridLayout, QMessageBox
+from PySide6.QtGui import QPixmap, QIcon
+from PySide6.QtCore import Qt, QTimer, Signal
 
 from threads import DownloadThread
 
@@ -9,26 +10,28 @@ class UpdaterWindow(QWidget):
     closeEvent = Signal(str, str)
     def __init__(self,
                  main=None,
-                 software_name='MyApp',
-                 current_version='1.0',
-                 filename="",
+                 software_name="MyApp",
+                 current_version="1.0",
                  download_location=r"",
-                 api_endpoint='',
+                 api_endpoint="",
                  parent=None):
         super(UpdaterWindow, self).__init__(parent)
         self.setWindowTitle("QUpdateTool")
         self.main = main
         self.software_name = software_name
         self.current_version = current_version
-        self.filename = filename
         self.download_location = download_location
         self.api_endpoint = api_endpoint
         self.download_progress_data = {}
 
-        self.update_timer = QTimer(self)
-        self.update_timer.timeout.connect(self.update_progress_bar)
-        self.update_timer.setInterval(20)
+        self.close_timer = QTimer()
+        self.close_timer.timeout.connect(self.close_window)
+        self.close_timer.setInterval(20)
 
+        self.widgets()
+
+
+    def widgets(self):
         layout = QGridLayout()
         
         self.icon = QLabel()
@@ -53,56 +56,94 @@ class UpdaterWindow(QWidget):
 
 
     def download_update(self):
-        self.download_thread = DownloadThread(api_endpoint=self.api_endpoint,
-                                              filename=self.filename,
-                                              download_location=self.download_location)
+        print("Update via GUI...")
+        try:
+            self.download_thread = DownloadThread(api_endpoint=self.api_endpoint,
+                                                  download_location=self.download_location)
 
-        self.download_thread.update_progress.connect(self.update_download_progress)
-        self.download_thread.finished.connect(self.handle_download_finish)
-        self.download_thread.start()
+            self.download_thread.update_progress.connect(self.update_download_progress, Qt.DirectConnection)
+            self.download_thread.finished.connect(self.handle_download_finish, Qt.DirectConnection)
+            self.download_thread.start()
+
+        except Exception as e:
+            response = self.main.show_message_box(icon=QMessageBox.Critical, 
+                                      text="Issue loading thread to download update. Please try again\t\nIf the issue persists, contact administrator at admin@quynnbell.com.\t\n\n", 
+                                      title="Download Thread Error", 
+                                      buttons=QMessageBox.Retry | QMessageBox.Close,
+                                      default_button=QMessageBox.Retry)
+
+            if response == QMessageBox.Retry:
+                self.download_update()
 
 
     def update_download_progress(self, data):
         self.download_progress_data = data
-        self.update_timer.start()
+        self.update_progress_bar()
 
 
     def handle_download_finish(self, message):
         self.progress_bar.setValue(100)
         self.label.setText(message)
         self.main.app.processEvents()
-        QTimer.singleShot(20, lambda: self.close_window())
+        self.closeEvent.emit(self.download_location, self.download_thread.output_file)
 
 
     def update_progress_bar(self):
-        unit = self.download_progress_data['unit']
-        n = self.format_size(self.download_progress_data['n'], unit)
-        total_size = self.format_size(self.download_progress_data['total'], unit)
+        unit = self.download_progress_data["unit"]
+        n, total_size = map(lambda key: self.format_size(self.download_progress_data[key], unit), ["n", "total"])
         percentage = (n / total_size) * 100
         self.progress_bar.setValue(percentage)
-        self.progress_bar.setFormat(f"{percentage:.2f}% | {n:.2f}{unit}/{total_size:.0f}{unit}")
-        self.main.app.processEvents()
+        self.progress_bar.setFormat(f"{percentage:.1f}% | {n:.2f}{unit}/{total_size:.0f}{unit}")
 
 
     def format_size(self, bytes, unit):
-        if unit.lower() == 'gb':
+        if unit.lower() == "gb":
             return bytes / (1024 * 1024 * 1024)
-        elif unit.lower() == 'mb':
+        elif unit.lower() == "mb":
             return bytes / (1024 * 1024)
-        elif unit.lower() == 'kb':
+        elif unit.lower() == "kb":
             return bytes / 1024
         else:
             return bytes
         
 
     def cancel_update(self):
-        self.download_thread.terminate()  # Terminate the download thread
+        self.download_thread.terminate()
+        self.download_thread.wait()
+
+        self.filepath = os.path.join(self.download_location, "update.exe")
+        if os.path.exists(self.filepath):
+            os.remove(self.filepath)
+
         self.handle_download_finish("Update cancelled by user")
+        self.close_window()
 
 
     def close_window(self):
-        self.closeEvent.emit(self.download_location, self.filename)
+        self.closeEvent.emit(self.download_location, "update.exe")
         self.close()
+
+
+    def show_message_box(self,
+                         icon: QMessageBox.Icon = QMessageBox.Information,
+                         text: str = "",
+                         title: str = "Error",
+                         buttons: QMessageBox.button =  QMessageBox.Ok, 
+                         default_button: QMessageBox.button =  QMessageBox.Ok):
+
+        msg_box = QMessageBox()
+        msg_box.setIcon(icon)
+        msg_box.setText(text)
+        msg_box.setWindowTitle(title)
+        msg_box.setStandardButtons(buttons)
+        msg_box.setDefaultButton(default_button)
+        msg_box.setWindowIcon(QIcon(self.main.program_icon))
+        response = msg_box.exec()
+
+        if response == QMessageBox.Close:
+            quit()
+            
+        return response
 
 
     def set_window_size(self):
@@ -125,11 +166,22 @@ class UpdaterWindow(QWidget):
 
 
     def initUI(self):
-        self.setWindowModality(Qt.ApplicationModal)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.set_window_size()
-        self.show()
-        self.download_update()
+        try:
+            self.setWindowModality(Qt.ApplicationModal)
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            self.set_window_size()
+            self.show()
+            self.download_update()
+
+        except Exception as e:
+            response = self.main.show_message_box(icon=QMessageBox.Critical, 
+                                      text="Issue loading GUI window. Please try again or try running with --noGUI=True flag.\t\nIf the issue persists, contact administrator at admin@quynnbell.com.\t\n\n", 
+                                      title="Window Error", 
+                                      buttons=QMessageBox.Retry | QMessageBox.Close,
+                                      default_button=QMessageBox.Retry)
+
+            if response == QMessageBox.Retry:
+                self.initUI()   
 
 
 

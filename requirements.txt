@@ -1,0 +1,9 @@
+pyside6
+requests
+datetime
+pytest
+psutil
+subprocess
+configparser
+argparse
+tqdm
