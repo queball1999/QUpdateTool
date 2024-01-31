@@ -10,8 +10,8 @@ class UpdaterWindow(QWidget):
     closeEvent = Signal(str, str)
     def __init__(self,
                  main=None,
-                 software_name="MyApp",
-                 current_version="1.0",
+                 software_name="software using QUpdateTool",
+                 current_version="{unknown}",
                  download_location=r"",
                  api_endpoint="",
                  parent=None):
@@ -59,7 +59,8 @@ class UpdaterWindow(QWidget):
         print("Update via GUI...")
         try:
             self.download_thread = DownloadThread(api_endpoint=self.api_endpoint,
-                                                  download_location=self.download_location)
+                                                  download_location=self.download_location,
+                                                  gui=True)
 
             self.download_thread.update_progress.connect(self.update_download_progress, Qt.DirectConnection)
             self.download_thread.finished.connect(self.handle_download_finish, Qt.DirectConnection)
@@ -141,7 +142,7 @@ class UpdaterWindow(QWidget):
         response = msg_box.exec()
 
         if response == QMessageBox.Close:
-            quit()
+            sys.exit()
             
         return response
 
